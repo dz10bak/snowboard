@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-forge-950 text-forge-200;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-forge-900;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-forge-600 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-forge-500;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-forge-800/50 backdrop-blur-xl border border-forge-600/30;
+  }
+}

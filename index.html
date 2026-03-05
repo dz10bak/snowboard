@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BoardForge – AI Snowboard Designer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            forge: {
+              950: '#060a12', 900: '#0a0e17', 800: '#111827', 700: '#1e293b',
+              600: '#334155', 500: '#64748b', 400: '#94a3b8', 300: '#cbd5e1',
+              200: '#e2e8f0', 100: '#f1f5f9',
+            },
+            accent: { blue: '#3b82f6', cyan: '#06b6d4', purple: '#8b5cf6' },
+            snow: '#f8fafc',
+          },
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+        },
+      },
+    };
+  </script>
+  <style>
+    body { background: #060a12; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #0a0e17; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; }
+    .glass { background: rgba(17,24,39,0.5); backdrop-filter: blur(24px); border: 1px solid rgba(51,65,85,0.3); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse-glow { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+    .anim-spin { animation: spin 2s linear infinite; }
+    .anim-spin-slow { animation: spin 3s linear infinite; }
+    .anim-spin-reverse { animation: spin 2s linear infinite reverse; }
+    .anim-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+    @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+    .anim-float { animation: float 2s ease-in-out infinite; }
+    @keyframes fade-up { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+    .fade-up { animation: fade-up 0.5s ease-out forwards; }
+    .fade-up-d1 { animation-delay: 0.1s; opacity: 0; }
+    .fade-up-d2 { animation-delay: 0.2s; opacity: 0; }
+    .fade-up-d3 { animation-delay: 0.3s; opacity: 0; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-type="module">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    // ─── CONFIG ──────────────────────────────────────────────
+    // Set your API key here (DO NOT commit this file with a real key)
+    const API_KEY = window.__DEAPI_KEY__ || prompt("Enter your deAPI key:");
+    const API_BASE = "https://api.deapi.ai";
+
+    // ─── CONSTANTS ───────────────────────────────────────────
+    const BOARD_SHAPES = [
+      { id: 'twin', name: 'Twin', desc: 'Symmetrical — identical nose and tail for switch riding' },
+      { id: 'directional', name: 'Directional', desc: 'Longer nose, shorter tail — built for charging' },
+      { id: 'directional-twin', name: 'Directional Twin', desc: 'Mostly symmetrical with slight directional setback' },
+      { id: 'swallowtail', name: 'Swallowtail', desc: 'Split V-shaped tail — floats in deep powder' },
+    ];
+
+    const RIDING_STYLES = [
+      { id: 'park', name: 'Park', desc: 'Jumps, rails, and tricks in the terrain park' },
+      { id: 'all-mountain', name: 'All-Mountain', desc: 'Versatile riding across the entire mountain' },
+      { id: 'freeride', name: 'Freeride', desc: 'Off-piste powder and backcountry exploration' },
+    ];
+
+    const GRAPHIC_STYLES = [
+      { id: 'minimal', name: 'Minimal', desc: 'Clean lines, simple forms, elegant space', gradient: 'from-gray-400 to-gray-600' },
+      { id: 'graffiti', name: 'Graffiti', desc: 'Street art, spray paint, urban energy', gradient: 'from-pink-500 to-yellow-400' },
+      { id: 'japanese', name: 'Japanese Art', desc: 'Ukiyo-e waves, cherry blossoms, woodblock', gradient: 'from-red-500 to-pink-300' },
+      { id: 'cyberpunk', name: 'Cyberpunk', desc: 'Neon circuits, glitch, futuristic', gradient: 'from-cyan-400 to-purple-600' },
+      { id: 'vintage', name: 'Vintage', desc: 'Retro posters, worn textures, classic type', gradient: 'from-amber-600 to-orange-400' },
+      { id: 'brutal-black', name: 'Brutal Black', desc: 'Heavy ink, bold blackwork, intense', gradient: 'from-gray-800 to-black' },
+    ];
+
+    const SUGGESTIONS = ['Mountains & Aurora', 'Wolf & Moon', 'Dragon', 'Geometric Patterns', 'Cosmic Space', 'Forest & Snow', 'Ocean Waves', 'Eagle & Peaks'];
+
+    // ─── PROMPT BUILDER ──────────────────────────────────────
+    const styleDesc = {
+      'park': 'playful freestyle energy, urban and dynamic feel, youthful',
+      'all-mountain': 'adventurous mountain vibe, balanced and bold, nature-inspired',
+      'freeride': 'raw powder energy, wild untamed mountain spirit, dramatic',
+    };
+    const graphicDesc = {
+      'minimal': 'clean minimalist design, simple lines, muted tones, elegant negative space',
+      'graffiti': 'street graffiti art style, spray paint textures, bold tags and drips, urban colors',
+      'japanese': 'traditional Japanese ukiyo-e art style, waves, mountains, cherry blossoms, woodblock print aesthetic',
+      'cyberpunk': 'cyberpunk neon aesthetic, futuristic circuits, glitch effects, electric blues and pinks',
+      'vintage': 'retro vintage poster style, worn textures, classic typography, earthy warm palette',
+      'brutal-black': 'brutal blackwork tattoo style, heavy black ink, bold linework, dark and intense patterns',
+    };
+
+    function buildPrompt(shape, riding, graphic, custom) {
+      let p = `A seamless vertical artwork illustration for a snowboard graphic. This is ONLY the artwork, NOT a picture of a snowboard. No board outline, no board shape, no product mockup. Just the tall vertical art piece that will be printed onto a snowboard. The mood is ${styleDesc[riding]}. The art style is ${graphicDesc[graphic]}`;
+      if (custom) p += `. The scene includes: ${custom}`;
+      p += '. Tall vertical composition, edge-to-edge art filling the entire frame, vibrant colors, high detail, no borders, no frames, no text, no watermarks, no product photography';
+      return p;
+    }
+
+    // ─── AI SERVICE ──────────────────────────────────────────
+    async function generateImage(prompt) {
+      // Step 1: fetch models and their limits
+      let model = 'Flux1schnell';
+      let maxSteps = 4;
+      let maxWidth = 1024;
+      let maxHeight = 1024;
+      let supportsGuidance = false;
+
+      try {
+        const modelsRes = await fetch(`${API_BASE}/api/v1/client/models?filter[inference_types]=txt2img&per_page=5`, {
+          headers: { 'Authorization': `Bearer ${API_KEY}`, 'Accept': 'application/json' },
+        });
+        const modelsData = await modelsRes.json();
+        if (modelsData.data && modelsData.data.length > 0) {
+          const m = modelsData.data[0];
+          model = m.slug;
+          if (m.info?.limits) {
+            maxSteps = m.info.limits.max_steps || 4;
+            maxWidth = m.info.limits.max_width || 1024;
+            maxHeight = m.info.limits.max_height || 1024;
+          }
+          if (m.info?.defaults?.steps) {
+            maxSteps = Math.min(maxSteps, m.info.defaults.steps);
+          }
+          if (m.info?.features) {
+            supportsGuidance = m.info.features.supports_guidance;
+          }
+        }
+      } catch (e) {
+        console.warn('Could not fetch models, using defaults:', e);
+      }
+
+      // Step 2: submit generation with model-safe params
+      const requestBody = {
+        prompt,
+        model,
+        width: Math.min(768, maxWidth),
+        height: Math.min(1024, maxHeight),
+        steps: maxSteps,
+        seed: Math.floor(Math.random() * 2147483647),
+      };
+      if (supportsGuidance) {
+        requestBody.guidance = 7.5;
+      }
+
+      const submitRes = await fetch(`${API_BASE}/api/v1/client/txt2img`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${API_KEY}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      const submitData = await submitRes.json();
+      const requestId = submitData?.data?.request_id;
+      if (!requestId) {
+        const errMsg = submitData?.message || (submitData?.errors ? JSON.stringify(submitData.errors) : 'No request_id returned');
+        throw new Error(errMsg);
+      }
+
+      // Step 3: poll for result
+      return await pollForResult(requestId, 120000);
+    }
+
+    // ─── SHARED POLL HELPER ──────────────────────────────────
+    async function pollForResult(requestId, timeoutMs) {
+      const start = Date.now();
+      let interval = 10000; // start at 10s between polls
+      while (Date.now() - start < timeoutMs) {
+        await new Promise(r => setTimeout(r, interval));
+        try {
+          const statusRes = await fetch(`${API_BASE}/api/v1/client/request-status/${requestId}`, {
+            headers: { 'Authorization': `Bearer ${API_KEY}`, 'Accept': 'application/json' },
+          });
+          if (statusRes.status === 429) {
+            console.warn('Rate limited, backing off 30s...');
+            interval = 30000;
+            continue;
+          }
+          const statusData = await statusRes.json();
+          const { status, result_url } = statusData.data || {};
+          console.log('Poll:', status, result_url ? '(has URL)' : '');
+          if (status === 'done' && result_url) return result_url;
+          if (status === 'error') throw new Error('AI processing failed');
+          interval = 10000; // reset interval after successful poll
+        } catch (e) {
+          if (e.message === 'AI processing failed') throw e;
+          console.warn('Poll fetch error:', e.message);
+        }
+      }
+      throw new Error(`Timed out after ${timeoutMs / 1000}s`);
+    }
+
+    // ─── AI EDIT SERVICE (img2img) ───────────────────────────
+    async function editImage(imageUrl, editInstruction) {
+      console.log('Fetching image for edit:', imageUrl);
+      const imgRes = await fetch(imageUrl);
+      if (!imgRes.ok) throw new Error(`Failed to fetch image: ${imgRes.status} ${imgRes.statusText}`);
+      const imgBlob = await imgRes.blob();
+      console.log('Image blob:', imgBlob.size, 'bytes, type:', imgBlob.type);
+
+      const formData = new FormData();
+      formData.append('image', imgBlob, 'design.png');
+      formData.append('prompt', editInstruction);
+      formData.append('model', 'Flux_2_Klein_4B_BF16');
+      formData.append('steps', '4');
+      formData.append('seed', String(Math.floor(Math.random() * 2147483647)));
+
+      console.log('Submitting img2img request...');
+      const submitRes = await fetch(`${API_BASE}/api/v1/client/img2img`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${API_KEY}` },
+        body: formData,
+      });
+
+      const submitData = await submitRes.json();
+      console.log('img2img submit response:', JSON.stringify(submitData));
+      const requestId = submitData?.data?.request_id;
+      if (!requestId) {
+        const errMsg = submitData?.message || (submitData?.errors ? JSON.stringify(submitData.errors) : 'No request_id returned');
+        throw new Error(errMsg);
+      }
+
+      return await pollForResult(requestId, 180000);
+    }
+
+    // ─── LOCAL STORAGE for community designs ─────────────────
+    function getSavedDesigns() {
+      try { return JSON.parse(localStorage.getItem('boardforge_designs') || '[]'); } catch { return []; }
+    }
+    function saveDesign(design) {
+      const designs = getSavedDesigns();
+      designs.unshift({ ...design, id: Date.now().toString(), likes: 0, featured: false, createdAt: new Date().toISOString() });
+      localStorage.setItem('boardforge_designs', JSON.stringify(designs));
+    }
+    function likeDesignLocal(id) {
+      const designs = getSavedDesigns();
+      const d = designs.find(d => d.id === id);
+      if (d) { d.likes = (d.likes || 0) + 1; localStorage.setItem('boardforge_designs', JSON.stringify(designs)); }
+      return designs;
+    }
+
+    // ─── SVG SHAPES ──────────────────────────────────────────
+    function BoardSVG({ type, className = "w-12 h-40" }) {
+      const paths = {
+        'twin': "M30 10 Q45 30 45 60 L45 140 Q45 170 30 190 Q15 170 15 140 L15 60 Q15 30 30 10Z",
+        'directional': "M30 5 Q48 30 46 65 L44 145 Q42 170 30 185 Q18 170 16 145 L14 65 Q12 30 30 5Z",
+        'directional-twin': "M30 8 Q46 30 45 62 L44 142 Q43 170 30 188 Q17 170 16 142 L15 62 Q14 30 30 8Z",
+        'swallowtail': "M30 5 Q48 30 46 65 L44 150 Q42 170 38 190 L30 175 L22 190 Q18 170 16 150 L14 65 Q12 30 30 5Z",
+      };
+      return (
+        <svg viewBox="0 0 60 200" className={className}>
+          <path d={paths[type]} fill="currentColor" opacity="0.3" stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+      );
+    }
+
+    function MountainIcon() {
+      return <svg viewBox="0 0 64 64" className="w-16 h-16"><path d="M4 52 L20 20 L28 32 L36 16 L44 28 L52 8 L60 52" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M2 52 H62" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
+    }
+
+    // ─── SHARED COMPONENTS ───────────────────────────────────
+    function Button({ children, variant = 'primary', size = 'md', disabled, loading, className = '', onClick }) {
+      const v = {
+        primary: 'bg-gradient-to-r from-accent-blue to-accent-cyan text-white shadow-lg shadow-blue-500/25',
+        secondary: 'border border-forge-600 text-forge-200 hover:bg-forge-700/50',
+        ghost: 'text-forge-400 hover:text-forge-200 hover:bg-forge-700/50',
+        danger: 'bg-red-600 text-white hover:bg-red-700',
+      };
+      const s = { sm: 'px-3 py-1.5 text-sm', md: 'px-5 py-2.5 text-sm', lg: 'px-8 py-3.5 text-base' };
+      return (
+        <button
+          onClick={onClick} disabled={disabled || loading}
+          className={`inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 ${v[variant]} ${s[size]} ${className}`}
+        >
+          {loading && <svg className="anim-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>}
+          {children}
+        </button>
+      );
+    }
+
+    function Card({ children, selected, onClick, className = '' }) {
+      return (
+        <div
+          onClick={onClick}
+          className={`rounded-xl border transition-all hover:-translate-y-1 hover:scale-[1.02] active:scale-[0.98] ${selected ? 'bg-blue-500/10 border-cyan-500/50 shadow-lg shadow-cyan-500/10' : 'bg-forge-800/50 border-forge-600/30 hover:border-forge-500/50'} ${onClick ? 'cursor-pointer' : ''} ${className}`}
+        >
+          {children}
+        </div>
+      );
+    }
+
+    // ─── NAVBAR ──────────────────────────────────────────────
+    function Navbar({ page, setPage }) {
+      return (
+        <nav className="fixed top-0 left-0 right-0 z-50 glass">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center justify-between h-16">
+              <button onClick={() => setPage('home')} className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center">
+                  <span className="text-white font-bold text-sm">BF</span>
+                </div>
+                <span className="text-snow font-bold text-lg tracking-tight">
+                  Board<span className="text-cyan-400">Forge</span>
+                </span>
+              </button>
+              <div className="flex items-center gap-1">
+                {[['home', 'Home'], ['design', 'Design'], ['community', 'Community']].map(([id, label]) => (
+                  <button key={id} onClick={() => setPage(id)}
+                    className={`relative px-4 py-2 text-sm font-medium rounded-lg transition-colors ${page === id ? 'bg-forge-700/50 text-snow' : 'text-forge-400 hover:text-forge-200'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </nav>
+      );
+    }
+
+    function Footer() {
+      return (
+        <footer className="border-t border-forge-700/50 mt-auto">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center">
+                  <span className="text-white font-bold text-[10px]">BF</span>
+                </div>
+                <span className="text-forge-400 text-sm">BoardForge — AI Snowboard Designer</span>
+              </div>
+              <p className="text-forge-500 text-sm">Powered by AI. Built for riders.</p>
+            </div>
+          </div>
+        </footer>
+      );
+    }
+
+    // ─── STEP INDICATOR ──────────────────────────────────────
+    function StepIndicator({ step, onStepClick }) {
+      const steps = [{ n: 1, l: 'Shape' }, { n: 2, l: 'Style' }, { n: 3, l: 'Graphics' }, { n: 4, l: 'Details' }];
+      return (
+        <div className="flex items-center justify-center gap-2 sm:gap-4 mb-8">
+          {steps.map(({ n, l }, i) => (
+            <div key={n} className="flex items-center gap-2 sm:gap-4">
+              <button onClick={() => n < step && onStepClick(n)} className={`flex items-center gap-2 ${n < step ? 'cursor-pointer' : 'cursor-default'}`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-all ${n === step ? 'bg-cyan-500 text-white scale-110 shadow-lg shadow-cyan-500/30' : n < step ? 'bg-blue-500 text-white' : 'bg-forge-600 text-forge-400'}`}>
+                  {n < step ? <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg> : n}
+                </div>
+                <span className={`hidden sm:inline text-sm font-medium ${n === step ? 'text-snow' : 'text-forge-400'}`}>{l}</span>
+              </button>
+              {i < 3 && <div className="w-8 sm:w-16 h-px bg-forge-600"><div className={`h-full bg-blue-500 transition-all duration-300 origin-left ${n < step ? 'scale-x-100' : 'scale-x-0'}`} /></div>}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ─── STEP 1: SHAPE ───────────────────────────────────────
+    function ShapeSelector({ selected, onSelect }) {
+      return (
+        <div className="fade-up">
+          <h2 className="text-2xl font-bold text-snow text-center mb-2">Choose Your Board Shape</h2>
+          <p className="text-forge-400 text-center mb-8">Select the foundation of your ride</p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {BOARD_SHAPES.map(s => (
+              <Card key={s.id} selected={selected === s.id} onClick={() => onSelect(s.id)} className="p-6 flex flex-col items-center text-center">
+                <div className="text-cyan-400 mb-3"><BoardSVG type={s.id} /></div>
+                <h3 className="text-snow font-semibold mb-1">{s.name}</h3>
+                <p className="text-forge-400 text-xs">{s.desc}</p>
+              </Card>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── STEP 2: RIDING STYLE ────────────────────────────────
+    function StyleSelector({ selected, onSelect }) {
+      return (
+        <div className="fade-up">
+          <h2 className="text-2xl font-bold text-snow text-center mb-2">Choose Your Riding Style</h2>
+          <p className="text-forge-400 text-center mb-8">This shapes the energy of your design</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl mx-auto">
+            {RIDING_STYLES.map(s => (
+              <Card key={s.id} selected={selected === s.id} onClick={() => onSelect(s.id)} className="p-8 flex flex-col items-center text-center">
+                <div className="text-cyan-400 mb-4"><MountainIcon /></div>
+                <h3 className="text-snow font-semibold text-lg mb-1">{s.name}</h3>
+                <p className="text-forge-400 text-sm">{s.desc}</p>
+              </Card>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── STEP 3: GRAPHIC STYLE ───────────────────────────────
+    function GraphicSelector({ selected, onSelect }) {
+      return (
+        <div className="fade-up">
+          <h2 className="text-2xl font-bold text-snow text-center mb-2">Choose Your Graphic Style</h2>
+          <p className="text-forge-400 text-center mb-8">Define the art direction for your board</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 max-w-3xl mx-auto">
+            {GRAPHIC_STYLES.map(s => (
+              <Card key={s.id} selected={selected === s.id} onClick={() => onSelect(s.id)} className="p-5 flex flex-col items-center text-center">
+                <div className={`w-full h-20 rounded-lg bg-gradient-to-br ${s.gradient} mb-4 opacity-80`} />
+                <h3 className="text-snow font-semibold mb-1">{s.name}</h3>
+                <p className="text-forge-400 text-xs">{s.desc}</p>
+              </Card>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── STEP 4: CUSTOM TEXT ─────────────────────────────────
+    function CustomTextInput({ value, onChange }) {
+      const add = (s) => {
+        const nv = value ? `${value}, ${s}` : s;
+        if (nv.length <= 200) onChange(nv);
+      };
+      return (
+        <div className="fade-up">
+          <h2 className="text-2xl font-bold text-snow text-center mb-2">Add Custom Details</h2>
+          <p className="text-forge-400 text-center mb-8">Optional — describe extra elements for your design</p>
+          <div className="max-w-2xl mx-auto">
+            <div className="relative">
+              <textarea value={value} onChange={e => onChange(e.target.value.slice(0, 200))}
+                placeholder="e.g., A howling wolf under northern lights with neon colors..."
+                rows={4} className="w-full bg-forge-800/50 border border-forge-600/30 rounded-xl p-4 text-forge-200 placeholder-forge-500 resize-none focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/25 transition-colors" />
+              <span className="absolute bottom-3 right-3 text-xs text-forge-500">{value.length}/200</span>
+            </div>
+            <div className="mt-4">
+              <p className="text-forge-500 text-sm mb-3">Quick suggestions:</p>
+              <div className="flex flex-wrap gap-2">
+                {SUGGESTIONS.map(s => (
+                  <button key={s} onClick={() => add(s)} className="px-3 py-1.5 text-xs rounded-full border border-forge-600/50 text-forge-300 hover:bg-forge-700/50 hover:border-cyan-500/30 transition-colors">{s}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── GENERATING SPINNER ──────────────────────────────────
+    function GeneratingSpinner() {
+      return (
+        <div className="flex flex-col items-center justify-center py-20 fade-up">
+          <div className="relative mb-8">
+            <div className="w-24 h-24 rounded-full border-2 border-forge-600 border-t-cyan-400 anim-spin-slow" />
+            <div className="absolute inset-3 rounded-full border-2 border-forge-700 border-b-blue-500 anim-spin-reverse" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-3 h-3 rounded-full bg-cyan-400 shadow-lg shadow-cyan-400/50 anim-pulse-glow" />
+            </div>
+          </div>
+          <h3 className="text-xl font-semibold text-snow mb-2 anim-pulse-glow">Forging your board...</h3>
+          <p className="text-forge-400 text-sm">AI is generating your custom snowboard design</p>
+          <p className="text-forge-500 text-xs mt-2">This may take 10–30 seconds</p>
+        </div>
+      );
+    }
+
+    // ─── DESIGN PREVIEW ──────────────────────────────────────
+    // Based on real Burton Process 157: 295mm wide x 1175mm long = ~1:4 ratio
+    // ViewBox 295x1175 maps directly to real mm dimensions
+    const BOARD_VB = "0 0 295 1175";
+    // Waist=252, Nose=295, Tail=295 for twin; sidecut creates the hourglass shape
+
+    const boardShapes = {
+      'twin': {
+        // Symmetrical twin: nose 295mm, waist 252mm, tail 295mm, equal nose/tail radius
+        outline: 'M147.5,12 C195,12 235,30 255,65 C270,90 278,125 278,160 L278,145 Q278,160 275,200 L267,250 Q258,290 258,350 L255,500 Q254,588 255,675 L258,825 Q258,885 267,925 L275,975 Q278,1015 278,1030 L278,1015 C278,1050 270,1085 255,1110 C235,1145 195,1163 147.5,1163 C100,1163 60,1145 40,1110 C25,1085 17,1050 17,1015 L17,1030 Q17,1015 20,975 L28,925 Q37,885 37,825 L40,675 Q41,588 40,500 L37,350 Q37,290 28,250 L20,200 Q17,160 17,145 L17,160 C17,125 25,90 40,65 C60,30 100,12 147.5,12 Z',
+        topsheet: 'M147.5,20 C192,20 228,36 247,68 C261,92 268,124 268,156 Q268,170 265,208 L258,256 Q250,294 250,352 L247,500 Q246,588 247,675 L250,823 Q250,881 258,919 L265,967 Q268,1005 268,1019 C268,1051 261,1083 247,1107 C228,1139 192,1155 147.5,1155 C103,1155 67,1139 48,1107 C34,1083 27,1051 27,1019 Q27,1005 30,967 L37,919 Q45,881 45,823 L48,675 Q49,588 48,500 L45,352 Q45,294 37,256 L30,208 Q27,170 27,156 C27,124 34,92 48,68 C67,36 103,20 147.5,20 Z',
+      },
+      'directional': {
+        // Directional: rounder/wider nose, narrower tapered tail
+        outline: 'M147.5,8 C198,8 240,28 260,65 C273,92 280,128 280,165 Q280,180 277,220 L269,270 Q260,310 260,370 L257,520 Q256,600 257,690 L259,830 Q259,878 264,910 L270,958 Q273,988 273,1005 C273,1035 267,1062 254,1085 C237,1115 203,1140 147.5,1145 C92,1140 58,1115 41,1085 C28,1062 22,1035 22,1005 Q22,988 25,958 L31,910 Q36,878 36,830 L38,690 Q39,600 38,520 L35,370 Q35,310 26,270 L18,220 Q15,180 15,165 C15,128 22,92 35,65 C55,28 97,8 147.5,8 Z',
+        topsheet: 'M147.5,16 C194,16 233,34 252,68 C264,93 270,126 270,160 Q270,176 267,214 L260,264 Q252,304 252,362 L249,520 Q248,600 249,690 L251,828 Q251,874 256,906 L261,950 Q264,980 264,998 C264,1026 258,1052 246,1074 C231,1102 200,1124 147.5,1128 C95,1124 64,1102 49,1074 C37,1052 31,1026 31,998 Q31,980 34,950 L39,906 Q44,874 44,828 L46,690 Q47,600 46,520 L43,362 Q43,304 35,264 L28,214 Q25,176 25,160 C25,126 31,93 43,68 C62,34 101,16 147.5,16 Z',
+      },
+      'directional-twin': {
+        // Directional twin: slightly longer nose, nearly symmetric
+        outline: 'M147.5,10 C196,10 236,28 256,64 C270,90 278,126 278,162 Q278,178 275,216 L268,264 Q259,302 259,360 L256,510 Q255,594 256,682 L259,826 Q259,882 267,920 L274,966 Q277,1002 277,1018 C277,1050 270,1082 256,1106 C236,1140 196,1158 147.5,1160 C99,1158 59,1140 39,1106 C25,1082 18,1050 18,1018 Q18,1002 21,966 L28,920 Q36,882 36,826 L39,682 Q40,594 39,510 L36,360 Q36,302 27,264 L20,216 Q17,178 17,162 C17,126 25,90 39,64 C59,28 99,10 147.5,10 Z',
+        topsheet: 'M147.5,18 C192,18 229,34 248,67 C261,92 268,124 268,158 Q268,174 265,210 L258,258 Q250,296 250,354 L247,510 Q246,594 247,682 L250,824 Q250,878 258,916 L264,960 Q267,994 267,1010 C267,1040 261,1070 248,1093 C229,1125 192,1142 147.5,1144 C103,1142 66,1125 47,1093 C34,1070 28,1040 28,1010 Q28,994 31,960 L37,916 Q45,878 45,824 L48,682 Q49,594 48,510 L45,354 Q45,296 37,258 L30,210 Q27,174 27,158 C27,124 34,92 47,67 C66,34 103,18 147.5,18 Z',
+      },
+      'swallowtail': {
+        // Swallowtail: directional nose + V-split tail
+        outline: 'M147.5,8 C198,8 240,28 260,65 C273,92 280,128 280,165 Q280,180 277,220 L269,270 Q260,310 260,370 L257,520 Q256,600 257,700 L259,800 Q260,840 262,870 L272,960 Q278,1000 278,1020 L270,1080 Q264,1110 252,1140 L225,1170 L200,1140 L175,1175 L147.5,1135 L120,1175 L95,1140 L70,1170 L43,1140 Q31,1110 25,1080 L17,1020 Q17,1000 23,960 L33,870 Q35,840 36,800 L38,700 Q39,600 38,520 L35,370 Q35,310 26,270 L18,220 Q15,180 15,165 C15,128 22,92 35,65 C55,28 97,8 147.5,8 Z',
+        topsheet: 'M147.5,16 C194,16 233,34 252,68 C264,93 270,126 270,160 Q270,176 267,214 L260,264 Q252,304 252,362 L249,520 Q248,600 249,700 L251,798 Q252,836 254,864 L263,950 Q268,988 268,1008 L261,1065 Q256,1092 245,1120 L222,1148 L200,1122 L175,1155 L147.5,1118 L120,1155 L95,1122 L73,1148 L50,1120 Q39,1092 34,1065 L27,1008 Q27,988 32,950 L41,864 Q43,836 44,798 L46,700 Q47,600 46,520 L43,362 Q43,304 35,264 L28,214 Q25,176 25,160 C25,126 31,93 43,68 C62,34 101,16 147.5,16 Z',
+      },
+    };
+
+    function SnowboardMockup({ imageUrl, shape }) {
+      const board = boardShapes[shape] || boardShapes['twin'];
+      const clipId = `topsheet-${shape}-${Math.random().toString(36).slice(2, 8)}`;
+
+      return (
+        <svg viewBox={BOARD_VB} className="w-full h-full" style={{ filter: 'drop-shadow(0 25px 50px rgba(0,0,0,0.6))' }}>
+          <defs>
+            <clipPath id={clipId}>
+              <path d={board.topsheet} />
+            </clipPath>
+            <linearGradient id="edgeShine" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#555" />
+              <stop offset="20%" stopColor="#999" />
+              <stop offset="50%" stopColor="#ddd" />
+              <stop offset="80%" stopColor="#999" />
+              <stop offset="100%" stopColor="#555" />
+            </linearGradient>
+            <linearGradient id="boardGloss" x1="0" y1="0" x2="0.5" y2="1">
+              <stop offset="0%" stopColor="white" stopOpacity="0.12" />
+              <stop offset="35%" stopColor="white" stopOpacity="0.02" />
+              <stop offset="65%" stopColor="black" stopOpacity="0" />
+              <stop offset="100%" stopColor="black" stopOpacity="0.1" />
+            </linearGradient>
+          </defs>
+
+          {/* Steel edge */}
+          <path d={board.outline} fill="#1a1a1a" />
+          <path d={board.outline} fill="url(#edgeShine)" opacity="0.25" />
+
+          {/* Topsheet with AI art */}
+          <image
+            href={imageUrl}
+            x="0" y="0" width="295" height="1175"
+            preserveAspectRatio="xMidYMid slice"
+            clipPath={`url(#${clipId})`}
+          />
+
+          {/* Glossy finish */}
+          <path d={board.topsheet} fill="url(#boardGloss)" />
+
+          {/* Binding inserts — front (4x2 pattern) */}
+          {[380, 405, 430, 455].map(y => (
+            <React.Fragment key={`f${y}`}>
+              <circle cx="115" cy={y} r="3.5" fill="#111" stroke="#333" strokeWidth="0.8" />
+              <circle cx="180" cy={y} r="3.5" fill="#111" stroke="#333" strokeWidth="0.8" />
+            </React.Fragment>
+          ))}
+          {/* Binding inserts — rear (4x2 pattern) */}
+          {[720, 745, 770, 795].map(y => (
+            <React.Fragment key={`r${y}`}>
+              <circle cx="115" cy={y} r="3.5" fill="#111" stroke="#333" strokeWidth="0.8" />
+              <circle cx="180" cy={y} r="3.5" fill="#111" stroke="#333" strokeWidth="0.8" />
+            </React.Fragment>
+          ))}
+        </svg>
+      );
+    }
+
+    // ─── CLIENT-SIDE IMAGE TRANSFORMS ────────────────────────
+    function transformImage(imageUrl, { flipH = false, flipV = false }) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.translate(canvas.width / 2, canvas.height / 2);
+          if (flipH) ctx.scale(-1, 1);
+          if (flipV) ctx.scale(1, -1);
+          ctx.drawImage(img, -img.width / 2, -img.height / 2);
+          resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = () => reject(new Error('Failed to load image for transform'));
+        img.src = imageUrl;
+      });
+    }
+
+    const EDIT_SUGGESTIONS = ['Make it darker', 'More vibrant colors', 'Add snow particles', 'Make it more abstract', 'Add mountain silhouette', 'Add neon glow', 'Make it monochrome', 'Invert the colors'];
+
+    function DesignPreview({ imageUrl, shape, ridingStyle, graphicStyle, onRegenerate, onNewDesign, onSave, saved, onEdit, isEditing, editError, onImageChange }) {
+      const [showEditPanel, setShowEditPanel] = useState(false);
+      const [editText, setEditText] = useState('');
+      const [transforming, setTransforming] = useState(false);
+      const mockupRef = useRef(null);
+
+      const handleFlip = async (type) => {
+        setTransforming(true);
+        try {
+          const newUrl = await transformImage(imageUrl, {
+            flipH: type === 'flipH',
+            flipV: type === 'flipV',
+          });
+          onImageChange(newUrl);
+        } catch (e) { console.error('Transform failed:', e); }
+        setTransforming(false);
+      };
+
+      const handleDownload = async () => {
+        try {
+          const svgEl = mockupRef.current?.querySelector('svg');
+          if (!svgEl) throw new Error('No SVG');
+
+          // Clone SVG and inline the image as base64
+          const clone = svgEl.cloneNode(true);
+          const imgEl = clone.querySelector('image');
+          if (imgEl) {
+            const resp = await fetch(imgEl.getAttribute('href'));
+            const blob = await resp.blob();
+            const base64 = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+            imgEl.setAttribute('href', base64);
+          }
+
+          // Render SVG to canvas
+          const svgData = new XMLSerializer().serializeToString(clone);
+          const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+          const svgUrl = URL.createObjectURL(svgBlob);
+
+          const canvas = document.createElement('canvas');
+          canvas.width = 590;
+          canvas.height = 2350;
+          const ctx = canvas.getContext('2d');
+
+          const img = new Image();
+          img.onload = () => {
+            ctx.drawImage(img, 0, 0);
+            URL.revokeObjectURL(svgUrl);
+            const a = document.createElement('a');
+            a.href = canvas.toDataURL('image/png');
+            a.download = `boardforge-${Date.now()}.png`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          };
+          img.onerror = () => { URL.revokeObjectURL(svgUrl); window.open(imageUrl, '_blank'); };
+          img.src = svgUrl;
+        } catch { window.open(imageUrl, '_blank'); }
+      };
+
+      const handleEditSubmit = () => {
+        if (!editText.trim()) return;
+        onEdit(editText.trim());
+        setEditText('');
+        setShowEditPanel(false);
+      };
+
+      return (
+        <div className="flex flex-col items-center fade-up">
+          <h2 className="text-2xl font-bold text-snow text-center mb-2">Your Board is Ready</h2>
+          <p className="text-forge-400 text-center mb-8">Here's your AI-generated snowboard design</p>
+          <div ref={mockupRef} className="relative mb-8" style={{ width: 'min(200px, 40vw)', height: 'min(75vh, 600px)' }}>
+            <SnowboardMockup imageUrl={imageUrl} shape={shape} />
+          </div>
+
+          {/* Quick transform buttons */}
+          <div className="flex justify-center gap-2 mb-4">
+            <button onClick={() => handleFlip('flipH')} disabled={transforming} className="px-3 py-1.5 text-xs rounded-lg bg-forge-700/50 border border-forge-600/30 text-forge-400 hover:text-snow hover:border-accent-blue/50 transition-colors disabled:opacity-50" title="Mirror horizontally">
+              Flip H
+            </button>
+            <button onClick={() => handleFlip('flipV')} disabled={transforming} className="px-3 py-1.5 text-xs rounded-lg bg-forge-700/50 border border-forge-600/30 text-forge-400 hover:text-snow hover:border-accent-blue/50 transition-colors disabled:opacity-50" title="Mirror vertically">
+              Flip V
+            </button>
+          </div>
+
+          <div className="flex flex-wrap justify-center gap-2 mb-6">
+            {[shape, ridingStyle, graphicStyle].map(t => <span key={t} className="px-3 py-1 text-xs rounded-full bg-forge-700/50 text-forge-300 border border-forge-600/30">{t}</span>)}
+          </div>
+
+          {/* Edit Panel */}
+          {showEditPanel && (
+            <div className="w-full max-w-md mb-6 fade-up">
+              <div className="glass rounded-xl p-4">
+                <label className="block text-sm font-medium text-forge-300 mb-2">Describe what you want to change</label>
+                <textarea
+                  value={editText}
+                  onChange={e => setEditText(e.target.value)}
+                  placeholder="e.g. Make the background darker, add more snow..."
+                  maxLength={200}
+                  rows={3}
+                  className="w-full bg-forge-800/50 border border-forge-600/30 rounded-lg px-4 py-3 text-snow placeholder-forge-500 focus:outline-none focus:border-accent-blue/50 resize-none text-sm"
+                />
+                <div className="flex flex-wrap gap-2 mt-3 mb-3">
+                  {EDIT_SUGGESTIONS.map(s => (
+                    <button
+                      key={s}
+                      onClick={() => setEditText(s)}
+                      className="px-3 py-1 text-xs rounded-full bg-forge-700/50 text-forge-400 border border-forge-600/30 hover:border-accent-blue/50 hover:text-snow transition-colors cursor-pointer"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={handleEditSubmit} disabled={!editText.trim()} size="sm">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                    Apply Edit
+                  </Button>
+                  <Button onClick={() => { setShowEditPanel(false); setEditText(''); }} variant="ghost" size="sm">Cancel</Button>
+                </div>
+                {editError && <p className="text-red-400 text-sm mt-2">{editError}</p>}
+              </div>
+            </div>
+          )}
+
+          {editError && !showEditPanel && <p className="text-red-400 text-sm text-center mb-4">{editError}</p>}
+
+          <div className="flex flex-wrap justify-center gap-3">
+            <Button onClick={handleDownload} size="lg">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+              Download
+            </Button>
+            <Button onClick={() => setShowEditPanel(!showEditPanel)} variant="secondary" size="lg">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+              Edit Design
+            </Button>
+            <Button onClick={onSave} variant={saved ? 'ghost' : 'secondary'} size="lg" disabled={saved}>
+              {saved ? 'Saved!' : 'Save to Community'}
+            </Button>
+            <Button onClick={onRegenerate} variant="secondary" size="lg">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              Regenerate
+            </Button>
+            <Button onClick={onNewDesign} variant="ghost" size="lg">New Design</Button>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── DESIGN PAGE ─────────────────────────────────────────
+    function DesignPage() {
+      const [step, setStep] = useState(1);
+      const [shape, setShape] = useState(null);
+      const [ridingStyle, setRidingStyle] = useState(null);
+      const [graphicStyle, setGraphicStyle] = useState(null);
+      const [customText, setCustomText] = useState('');
+      const [generating, setGenerating] = useState(false);
+      const [imageUrl, setImageUrl] = useState(null);
+      const [error, setError] = useState(null);
+      const [saved, setSaved] = useState(false);
+      const [editing, setEditing] = useState(false);
+      const [editError, setEditError] = useState(null);
+
+      const canGenerate = shape && ridingStyle && graphicStyle;
+
+      const handleGenerate = async () => {
+        setGenerating(true); setError(null);
+        try {
+          const prompt = buildPrompt(shape, ridingStyle, graphicStyle, customText);
+          const url = await generateImage(prompt);
+          setImageUrl(url);
+        } catch (e) {
+          setError(e.message || 'Failed to generate. Please try again.');
+        }
+        setGenerating(false);
+      };
+
+      const handleEdit = async (editInstruction) => {
+        setEditing(true); setEditError(null);
+        try {
+          const newUrl = await editImage(imageUrl, editInstruction);
+          setImageUrl(newUrl);
+          setSaved(false);
+        } catch (e) {
+          setEditError(e.message || 'Failed to edit. Please try again.');
+        }
+        setEditing(false);
+      };
+
+      const handleSave = () => {
+        saveDesign({ shape, ridingStyle, graphicStyle, customText, imageUrl });
+        setSaved(true);
+      };
+
+      const handleRegenerate = () => { setImageUrl(null); setSaved(false); handleGenerate(); };
+      const reset = () => { setStep(1); setShape(null); setRidingStyle(null); setGraphicStyle(null); setCustomText(''); setImageUrl(null); setError(null); setSaved(false); setEditError(null); };
+
+      if (editing) return <div className="max-w-4xl mx-auto px-4 py-12"><GeneratingSpinner /></div>;
+
+      if (imageUrl) return (
+        <div className="max-w-4xl mx-auto px-4 py-12">
+          <DesignPreview imageUrl={imageUrl} shape={shape} ridingStyle={ridingStyle} graphicStyle={graphicStyle} onRegenerate={handleRegenerate} onNewDesign={reset} onSave={handleSave} saved={saved} onEdit={handleEdit} isEditing={editing} editError={editError} onImageChange={(url) => { setImageUrl(url); setSaved(false); }} />
+        </div>
+      );
+
+      if (generating) return <div className="max-w-4xl mx-auto px-4 py-12"><GeneratingSpinner /></div>;
+
+      return (
+        <div className="max-w-4xl mx-auto px-4 py-12">
+          <StepIndicator step={step} onStepClick={setStep} />
+          {step === 1 && <ShapeSelector selected={shape} onSelect={v => { setShape(v); setStep(2); }} />}
+          {step === 2 && <StyleSelector selected={ridingStyle} onSelect={v => { setRidingStyle(v); setStep(3); }} />}
+          {step === 3 && <GraphicSelector selected={graphicStyle} onSelect={v => { setGraphicStyle(v); setStep(4); }} />}
+          {step === 4 && <CustomTextInput value={customText} onChange={setCustomText} />}
+
+          {step === 4 && (
+            <div className="flex flex-col items-center mt-8 gap-4">
+              <Button onClick={handleGenerate} disabled={!canGenerate} size="lg" className="min-w-[200px]">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                Forge My Board
+              </Button>
+              {error && <p className="text-red-400 text-sm text-center">{error}</p>}
+            </div>
+          )}
+
+          {step > 1 && (
+            <div className="flex justify-center mt-6">
+              <Button variant="ghost" onClick={() => setStep(step - 1)}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                Back
+              </Button>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── COMMUNITY PAGE ──────────────────────────────────────
+    function CommunityPage({ setPage: setNav }) {
+      const [designs, setDesigns] = useState(getSavedDesigns());
+      const [sort, setSort] = useState('newest');
+      const [modal, setModal] = useState(null);
+
+      const sorted = [...designs].sort((a, b) => {
+        if (sort === 'popular') return (b.likes || 0) - (a.likes || 0);
+        if (sort === 'featured') return (b.featured ? 1 : 0) - (a.featured ? 1 : 0);
+        return new Date(b.createdAt) - new Date(a.createdAt);
+      });
+
+      const handleLike = (id) => {
+        const updated = likeDesignLocal(id);
+        setDesigns(updated);
+      };
+
+      return (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="text-center mb-10 fade-up">
+            <h1 className="text-4xl font-bold text-snow mb-3">Community Designs</h1>
+            <p className="text-forge-400 text-lg">Browse AI-generated snowboard designs</p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-8">
+            <div className="flex items-center gap-1 p-1 rounded-lg bg-forge-800/50 border border-forge-600/30">
+              {[['newest', 'Newest'], ['popular', 'Most Liked'], ['featured', 'Featured']].map(([v, l]) => (
+                <button key={v} onClick={() => setSort(v)}
+                  className={`relative px-4 py-2 text-sm font-medium rounded-md transition-colors ${sort === v ? 'bg-forge-700 text-snow' : 'text-forge-400 hover:text-forge-300'}`}
+                >{l}</button>
+              ))}
+            </div>
+            <p className="text-forge-500 text-sm">{designs.length} designs</p>
+          </div>
+
+          {sorted.length === 0 ? (
+            <div className="text-center py-20">
+              <p className="text-forge-400 text-lg mb-2">No designs yet</p>
+              <p className="text-forge-500 text-sm mb-6">Be the first to forge a board!</p>
+              <Button onClick={() => setNav('design')}>Create a Design</Button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {sorted.map((d, i) => (
+                <div key={d.id} className={`fade-up fade-up-d${Math.min(i % 4, 3)}`}>
+                  <div onClick={() => setModal(d)} className="group cursor-pointer rounded-xl overflow-hidden bg-forge-800/50 border border-forge-600/30 hover:border-forge-500/50 transition-all hover:-translate-y-1">
+                    <div className="relative aspect-[3/4] overflow-hidden">
+                      <img src={d.imageUrl} alt="Snowboard" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
+                      {d.featured && <div className="absolute top-3 left-3 px-2 py-1 text-xs font-semibold rounded-full bg-cyan-500/90 text-white">Featured</div>}
+                    </div>
+                    <div className="p-4">
+                      <div className="flex flex-wrap gap-1.5 mb-3">
+                        {[d.shape, d.ridingStyle, d.graphicStyle].map(t => <span key={t} className="px-2 py-0.5 text-[10px] rounded-full bg-forge-700/50 text-forge-300 border border-forge-600/30">{t}</span>)}
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <button onClick={e => { e.stopPropagation(); handleLike(d.id); }} className="flex items-center gap-1.5 group/like">
+                          <svg className="w-5 h-5 text-forge-400 group-hover/like:text-red-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
+                          <span className="text-sm text-forge-400">{d.likes || 0}</span>
+                        </button>
+                        <span className="text-xs text-forge-500">{new Date(d.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Modal */}
+          {modal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setModal(null)} />
+              <div className="relative z-10 w-full max-w-2xl max-h-[90vh] overflow-auto rounded-2xl bg-forge-800 border border-forge-600/30 shadow-2xl p-6">
+                <button onClick={() => setModal(null)} className="absolute top-4 right-4 text-forge-400 hover:text-snow transition-colors">
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+                <img src={modal.imageUrl} alt="Snowboard" className="w-full rounded-lg mb-4" />
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {[modal.shape, modal.ridingStyle, modal.graphicStyle].map(t => <span key={t} className="px-3 py-1 text-xs rounded-full bg-forge-700/50 text-forge-300 border border-forge-600/30">{t}</span>)}
+                </div>
+                {modal.customText && <p className="text-forge-400 text-sm italic">"{modal.customText}"</p>}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── HOME PAGE ───────────────────────────────────────────
+    function HomePage({ setPage }) {
+      const [featured, setFeatured] = useState([]);
+      useEffect(() => {
+        const d = getSavedDesigns().sort((a, b) => (b.likes || 0) - (a.likes || 0)).slice(0, 4);
+        setFeatured(d);
+      }, []);
+
+      return (
+        <div>
+          {/* Hero */}
+          <section className="relative min-h-[90vh] flex items-center justify-center overflow-hidden">
+            <div className="absolute inset-0">
+              <div className="absolute inset-0 bg-gradient-to-b from-forge-950 via-forge-900 to-forge-950" />
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-cyan-500/5 rounded-full blur-3xl" />
+              <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-blue-500/5 rounded-full blur-3xl" />
+            </div>
+            <div className="absolute bottom-0 left-0 right-0 h-64 opacity-10">
+              <svg viewBox="0 0 1440 320" className="w-full h-full" preserveAspectRatio="none">
+                <path fill="currentColor" d="M0,224L60,208C120,192,240,160,360,154.7C480,149,600,171,720,181.3C840,192,960,192,1080,170.7C1200,149,1320,107,1380,85.3L1440,64L1440,320L0,320Z" />
+              </svg>
+            </div>
+
+            <div className="relative z-10 max-w-4xl mx-auto px-4 text-center fade-up">
+              <h1 className="text-5xl sm:text-7xl font-black text-snow mb-6 leading-tight tracking-tight">
+                Forge Your
+                <span className="block bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">Dream Board</span>
+              </h1>
+              <p className="text-xl text-forge-400 mb-10 max-w-2xl mx-auto">
+                Design custom snowboard graphics with AI. Choose your style, generate unique art, and share with the community.
+              </p>
+              <Button size="lg" className="text-lg px-10 py-4" onClick={() => setPage('design')}>
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                Design Your Board
+              </Button>
+            </div>
+
+            <div className="absolute bottom-8 left-1/2 -translate-x-1/2 anim-float">
+              <svg className="w-6 h-6 text-forge-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg>
+            </div>
+          </section>
+
+          {/* How it works */}
+          <section className="py-24 px-4">
+            <div className="max-w-5xl mx-auto">
+              <h2 className="text-3xl font-bold text-snow text-center mb-16">How It Works</h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                {[
+                  { s: '01', t: 'Choose Your Style', d: 'Pick your board shape, riding style, and art direction from curated options.', icon: <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" /></svg> },
+                  { s: '02', t: 'AI Generates', d: 'Our AI engine creates a unique, high-quality snowboard graphic in seconds.', icon: <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg> },
+                  { s: '03', t: 'Download & Share', d: 'Preview your board, download the design, and share it with the community.', icon: <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg> },
+                ].map((item, i) => (
+                  <div key={item.s} className={`relative p-8 rounded-xl bg-forge-800/30 border border-forge-600/20 text-center group hover:border-cyan-500/30 transition-colors fade-up fade-up-d${i + 1}`}>
+                    <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500/20 to-cyan-500/20 text-cyan-400 mb-5 group-hover:scale-110 transition-transform">
+                      {item.icon}
+                    </div>
+                    <div className="absolute top-4 right-4 text-5xl font-black text-forge-800/50">{item.s}</div>
+                    <h3 className="text-lg font-semibold text-snow mb-2">{item.t}</h3>
+                    <p className="text-forge-400 text-sm">{item.d}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          {/* Featured */}
+          {featured.length > 0 && (
+            <section className="py-24 px-4 bg-forge-900/50">
+              <div className="max-w-7xl mx-auto">
+                <div className="flex items-center justify-between mb-10">
+                  <div>
+                    <h2 className="text-3xl font-bold text-snow">Community Creations</h2>
+                    <p className="text-forge-400 mt-1">See what others have forged</p>
+                  </div>
+                  <Button variant="secondary" onClick={() => setPage('community')}>View All</Button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                  {featured.map(d => (
+                    <div key={d.id} className="rounded-xl overflow-hidden bg-forge-800/50 border border-forge-600/30">
+                      <div className="aspect-[3/4] overflow-hidden"><img src={d.imageUrl} alt="Snowboard" className="w-full h-full object-cover" loading="lazy" /></div>
+                      <div className="p-4">
+                        <div className="flex flex-wrap gap-1.5">
+                          {[d.shape, d.ridingStyle, d.graphicStyle].map(t => <span key={t} className="px-2 py-0.5 text-[10px] rounded-full bg-forge-700/50 text-forge-300 border border-forge-600/30">{t}</span>)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* CTA */}
+          <section className="py-24 px-4 text-center">
+            <h2 className="text-3xl sm:text-4xl font-bold text-snow mb-4">Ready to forge your board?</h2>
+            <p className="text-forge-400 mb-8 text-lg">It takes less than a minute to create a unique snowboard design.</p>
+            <Button size="lg" className="text-lg px-10 py-4" onClick={() => setPage('design')}>Start Designing</Button>
+          </section>
+        </div>
+      );
+    }
+
+    // ─── APP ─────────────────────────────────────────────────
+    function App() {
+      const [page, setPage] = useState('home');
+      useEffect(() => { window.scrollTo(0, 0); }, [page]);
+
+      return (
+        <div className="min-h-screen flex flex-col">
+          <Navbar page={page} setPage={setPage} />
+          <main className="flex-1 pt-16">
+            {page === 'home' && <HomePage setPage={setPage} />}
+            {page === 'design' && <DesignPage />}
+            {page === 'community' && <CommunityPage setPage={setPage} />}
+          </main>
+          <Footer />
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

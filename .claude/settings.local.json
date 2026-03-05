@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:docs.deapi.ai)",
+      "WebFetch(domain:api.deapi.ai)",
+      "WebFetch(domain:deapi.ai)",
+      "Bash(curl:*)",
+      "WebSearch",
+      "WebFetch(domain:neversummer.com)",
+      "WebFetch(domain:mcp.deapi.ai)",
+      "Bash(npm install:*)",
+      "Bash(echo:*)",
+      "Bash(open:*)",
+      "Bash(grep:*)",
+      "Bash(git rm:*)",
+      "Bash(git commit:*)",
+      "Bash(git update-ref:*)"
+    ]
+  }
+}
